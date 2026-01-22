@@ -1,22 +1,38 @@
-const toggle = document.getElementById("toggle");
-const nameInput = document.getElementById("nameInput");
-const saveBtn = document.getElementById("save");
-const previewName = document.getElementById("previewName");
+try {
+    chrome.storage.local.get('seunome', (data) => {
+        const cacheSeunome = data.seunome;
 
-// Carregar dados salvos
-chrome.storage.local.get(["enabled", "name"], (data) => {
-  toggle.checked = data.enabled || false;
-  nameInput.value = data.name || "";
-  previewName.textContent = (data.name || "Nome") + ":";
+        const seunomeInput = document.getElementById("seunome");
+
+        if (seunomeInput && cacheSeunome) {
+            seunomeInput.value = cacheSeunome;
+        }
+    });
+} catch (error) {
+    console.log("Chrome storage error", error);
+}
+
+
+// Salva valores
+document.getElementById("btnSalvar").addEventListener("click", () => {
+    const seunome = document.getElementById("seunome").value;
+
+    chrome.storage.local.set({ seunome }, () => {
+        console.log("Valores salvos no storage da extensão");
+    });
 });
 
-nameInput.addEventListener("input", () => {
-  previewName.textContent = nameInput.value + ":";
+document.getElementById("btnSalvar").addEventListener("click", () => {
+    let salvarMsg = document.querySelector('#salvarMsg');
+
+    if(salvarMsg){
+        salvarMsg.innerText = 'Salvo com sucesso!'
+    }
+
 });
 
-saveBtn.addEventListener("click", () => {
-  chrome.storage.local.set({
-    enabled: toggle.checked,
-    name: nameInput.value
-  });
+
+document.getElementById("seunome").addEventListener("input", () => {
+    let salvarMsg = document.querySelector('#salvarMsg');
+    salvarMsg.innerText = ''
 });

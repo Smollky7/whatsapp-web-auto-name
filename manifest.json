@@ -1,17 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Nome no WhatsApp Web",
-  "description": "Adiciona automaticamente seu nome antes das mensagens no WhatsApp Web",
+  "name": "WhatsApp Web Prefix",
   "version": "1.0",
-  "permissions": ["storage"],
-  "host_permissions": ["https://web.whatsapp.com/*"],
+  "description": "Adicionar Prefixo no WhatsApp Web.",
+  "permissions": ["storage", "tabs", "scripting"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   },
   "content_scripts": [
     {
       "matches": ["https://web.whatsapp.com/*"],
-      "js": ["content.js"]
+      "js": ["jquery-3.7.1.min.js", "content.js"]
     }
   ]
 }

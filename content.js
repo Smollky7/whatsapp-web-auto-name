@@ -1,35 +1,92 @@
-function interceptSend() {
-  const observer = new MutationObserver(() => {
-    const input = document.querySelector('[contenteditable="true"][data-tab="10"]');
-    if (!input) return;
+window.addEventListener("load", (event) => {
+  messageSend.atualizarElemento();
+});
 
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        chrome.storage.local.get(["enabled", "name"], (data) => {
-          if (!data.enabled || !data.name) return;
+let line = ``;
+var ZapZap = ZapZap || {};
 
-          const message = input.innerText.trim();
-          if (message.startsWith("**" + data.name)) return;
+ZapZap.MessageSend = (function () {
+  function MessageSend() {
+    this.textearea = document.querySelectorAll('div[contenteditable="true"]');
+  }
 
-          e.preventDefault();
+  MessageSend.prototype.limparTextarea = function () {
+    if (this.textearea[1]) {
+      this.textearea[1].innerHTML = "";
+      this.textearea[1].dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
 
-          const newMessage =
-            `**${data.name}:**\n*${message}*`;
+  MessageSend.prototype.atualizarElemento = function (scriptText) {
+    this.textearea = document.querySelectorAll('div[contenteditable="true"]');
+    if (
+      this.textearea.length > 1 &&
+      !this.textearea[1].textContent.includes(scriptText)
+    ) {
+      this.spans = this.textearea[1].querySelectorAll("p.copyable-text span");
+      this.br = this.textearea[1].querySelector("p.copyable-text br");
+    }
+  };
 
-          input.innerText = newMessage;
+  MessageSend.prototype.simularBackspace = function () {
+    const event = new KeyboardEvent("keydown", {
+      key: "Backspace",
+      code: "Backspace",
+      keyCode: 8,
+      charCode: 0,
+      bubbles: true,
+      cancelable: true,
+    });
 
-          setTimeout(() => {
-            document.execCommand("insertLineBreak");
-          }, 50);
-        });
+    this.textearea[1].dispatchEvent(event);
+    this.textearea[1].innerHTML = this.textearea[1].innerHTML.slice(0, -1);
+    this.textearea[1].dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  MessageSend.prototype.iniciar = function (scriptText) {
+    this.atualizarElemento(scriptText);
+    if (this.textearea.length > 1 && !this.br) {
+      this.atualizarElemento(scriptText);
+      if (!this.textearea[1].innerHTML.includes(scriptText)) {
+        line = `*${scriptText}:* ${this.spans[0].innerHTML}`;
+        this.textearea[1].focus();
+        this.simularBackspace();
+        document.execCommand("insertText", false, line);
+        this.textearea[1].dispatchEvent(new Event("change", { bubbles: true }));
+        this.limparTextarea();
       }
-    }, { once: true });
-  });
+    }
+  };
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
+  return MessageSend;
+})();
+
+let seunome = "";
+
+function carregarSeuNome() {
+  chrome.storage.local.get("seunome", (data) => {
+    seunome = data.seunome || "";
   });
 }
 
-interceptSend();
+carregarSeuNome();
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.seunome) {
+    seunome = changes.seunome.newValue || "";
+  }
+});
+
+const messageSend = new ZapZap.MessageSend();
+
+let timeout = null;
+const observer = new MutationObserver(() => {
+  if (!seunome) return;
+
+    messageSend.iniciar(seunome);
+});
+
+observer.observe(document.body, {
+  childList: true,
+  subtree: true,
+});

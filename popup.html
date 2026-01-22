@@ -1,29 +1,37 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <link rel="stylesheet" href="popup.css" />
+  <meta charset="UTF-8">
+  <title>WhatsApp Web Prefix</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
 
-  <h2>WhatsApp Nome</h2>
+  <div class="container">
+    <h1>WhatsApp Web Prefix</h1>
 
-  <label class="switch">
-    <input type="checkbox" id="toggle">
-    <span class="slider"></span>
-  </label>
+    <p class="subtitle">
+      Defina o prefixo que será usado antes das mensagens
+    </p>
 
-  <input type="text" id="nameInput" placeholder="Digite seu nome">
+    <input 
+      type="text" 
+      id="seunome" 
+      placeholder="Ex: Atendimento • João"
+      autocomplete="off"
+    >
 
-  <div class="preview">
-    <div class="bubble">
-      <strong id="previewName">Nome:</strong><br>
-      <em>Mensagem de exemplo</em>
-    </div>
+    <button id="btnSalvar">
+      Salvar configuração
+    </button>
+
+    <p class="subtitle" id="salvarMsg"></p>
+
+    <span class="footer">
+      © caa.org.br
+    </span>
   </div>
 
-  <button id="save">Salvar</button>
-
-  <script src="popup.js"></script>
+  <script src="popup.js" defer></script>
 </body>
 </html>
