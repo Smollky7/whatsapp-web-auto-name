@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Nome no WhatsApp Web",
+  "description": "Adiciona automaticamente seu nome antes das mensagens no WhatsApp Web",
+  "version": "1.0",
+  "permissions": ["storage"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
