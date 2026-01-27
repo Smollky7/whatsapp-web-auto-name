@@ -1,38 +1,49 @@
-try {
-    chrome.storage.local.get('seunome', (data) => {
-        const cacheSeunome = data.seunome;
+// Elementos principais da interface
+const nameField = document.getElementById('prefixInput');
+const activeToggle = document.getElementById('enabledToggle');
+const saveButton = document.getElementById('saveBtn');
+const feedbackBox = document.getElementById('successMsg');
+const previewBox = document.getElementById('previewText');
 
-        const seunomeInput = document.getElementById("seunome");
+// Carrega configurações salvas
+chrome.storage.sync.get(
+  ['userLabel', 'extensionActive'],
+  (config) => {
+    nameField.value = config.userLabel || 'Nome';
+    activeToggle.checked = config.extensionActive !== false;
+    refreshPreview();
+  }
+);
 
-        if (seunomeInput && cacheSeunome) {
-            seunomeInput.value = cacheSeunome;
-        }
-    });
-} catch (error) {
-    console.log("Chrome storage error", error);
+// Atualiza prévia em tempo real
+nameField.addEventListener('input', refreshPreview);
+activeToggle.addEventListener('change', () => {
+  chrome.storage.sync.set({
+    extensionActive: activeToggle.checked
+  });
+  refreshPreview();
+});
+
+/**
+ * Atualiza o balão de pré-visualização
+ */
+function refreshPreview() {
+  const name = nameField.value || 'Nome';
+
+  if (activeToggle.checked) {
+    previewBox.innerHTML = `<strong>${name}:</strong><br>Olá, tudo bem?`;
+  } else {
+    previewBox.textContent = 'Olá, tudo bem?';
+  }
 }
 
-
-// Salva valores
-document.getElementById("btnSalvar").addEventListener("click", () => {
-    const seunome = document.getElementById("seunome").value;
-
-    chrome.storage.local.set({ seunome }, () => {
-        console.log("Valores salvos no storage da extensão");
-    });
-});
-
-document.getElementById("btnSalvar").addEventListener("click", () => {
-    let salvarMsg = document.querySelector('#salvarMsg');
-
-    if(salvarMsg){
-        salvarMsg.innerText = 'Salvo com sucesso!'
+// Salva o nome configurado
+saveButton.addEventListener('click', () => {
+  chrome.storage.sync.set(
+    { userLabel: nameField.value.trim() || 'Nome' },
+    () => {
+      feedbackBox.style.display = 'block';
+      setTimeout(() => feedbackBox.style.display = 'none', 2000);
     }
-
-});
-
-
-document.getElementById("seunome").addEventListener("input", () => {
-    let salvarMsg = document.querySelector('#salvarMsg');
-    salvarMsg.innerText = ''
+  );
 });

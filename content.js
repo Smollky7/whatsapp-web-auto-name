@@ -1,92 +1,235 @@
-window.addEventListener("load", (event) => {
-  messageSend.atualizarElemento();
-});
+/******************************************************
+ * EXTENSÃO: Assinatura Automática WhatsApp Web
+ * RESPONSABILIDADE:
+ * - Interceptar envio de mensagens
+ * - Inserir identificador no início
+ ******************************************************/
 
-let line = ``;
-var ZapZap = ZapZap || {};
+const DEBUG_TAG = '[AutoSignature]';
 
-ZapZap.MessageSend = (function () {
-  function MessageSend() {
-    this.textearea = document.querySelectorAll('div[contenteditable="true"]');
+/**
+ * Log centralizado pra facilitar debug
+ */
+function debugLog(...args) {
+  console.log(DEBUG_TAG, ...args);
+}
+
+/**
+ * Pequeno delay para sincronizar com o DOM
+ */
+function sleep(ms = 20) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Seletores possíveis para caixa de texto
+ * (WhatsApp muda bastante dependendo do contexto)
+ */
+const MESSAGE_INPUT_SELECTOR = [
+  'div[contenteditable="true"][aria-label="Digite uma mensagem"]',
+  'div[contenteditable="true"][title="Digite uma mensagem"]',
+  'div[contenteditable="true"][aria-label="Escrever mensagem"]',
+  'div[contenteditable="true"][aria-placeholder="Adicione uma legenda"]'
+].join(', ');
+
+const SEND_BUTTON_SELECTOR = 'button[aria-label="Enviar"]';
+const MEDIA_CONFIRM_SELECTOR = 'div[aria-label="Enviar"]';
+
+/**
+ * Funções utilitárias relacionadas ao DOM
+ */
+const domActions = {
+
+  pressEnter(element) {
+    debugLog('Simulando Enter');
+    element.focus();
+
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true
+      })
+    );
+  },
+
+  pressShiftEnter(element) {
+    element.focus();
+
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true
+      })
+    );
+  },
+
+  async moveCaretToBeginning(element) {
+    element.focus();
+    await sleep();
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    const range = document.createRange();
+    const textNode = element.firstChild || element;
+
+    range.setStart(textNode, 0);
+    range.collapse(true);
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  },
+
+  getText(element) {
+    return element.innerText || '';
   }
+};
 
-  MessageSend.prototype.limparTextarea = function () {
-    if (this.textearea[1]) {
-      this.textearea[1].innerHTML = "";
-      this.textearea[1].dispatchEvent(new Event("input", { bubbles: true }));
+/**
+ * Controla todo o fluxo de envio
+ */
+const sendController = {
+
+  busy: false,
+
+  async handleSend() {
+    if (this.busy) return;
+    this.busy = true;
+
+    const input = document.querySelector(MESSAGE_INPUT_SELECTOR);
+
+    // Caso especial: envio de áudio
+    if (!input) {
+      const audioBtn = document.querySelector(SEND_BUTTON_SELECTOR);
+      if (audioBtn) audioBtn.click();
+      this.busy = false;
+      return;
     }
-  };
 
-  MessageSend.prototype.atualizarElemento = function (scriptText) {
-    this.textearea = document.querySelectorAll('div[contenteditable="true"]');
-    if (
-      this.textearea.length > 1 &&
-      !this.textearea[1].textContent.includes(scriptText)
-    ) {
-      this.spans = this.textearea[1].querySelectorAll("p.copyable-text span");
-      this.br = this.textearea[1].querySelector("p.copyable-text br");
-    }
-  };
+    try {
+      const config = await new Promise(resolve =>
+        chrome.storage.sync.get(
+          ['userLabel', 'extensionActive'],
+          resolve
+        )
+      );
 
-  MessageSend.prototype.simularBackspace = function () {
-    const event = new KeyboardEvent("keydown", {
-      key: "Backspace",
-      code: "Backspace",
-      keyCode: 8,
-      charCode: 0,
-      bubbles: true,
-      cancelable: true,
-    });
+      const label = config.userLabel || 'Nome';
+      const active = config.extensionActive !== false;
 
-    this.textearea[1].dispatchEvent(event);
-    this.textearea[1].innerHTML = this.textearea[1].innerHTML.slice(0, -1);
-    this.textearea[1].dispatchEvent(new Event("input", { bubbles: true }));
-  };
-
-  MessageSend.prototype.iniciar = function (scriptText) {
-    this.atualizarElemento(scriptText);
-    if (this.textearea.length > 1 && !this.br) {
-      this.atualizarElemento(scriptText);
-      if (!this.textearea[1].innerHTML.includes(scriptText)) {
-        line = `*${scriptText}:* ${this.spans[0].innerHTML}`;
-        this.textearea[1].focus();
-        this.simularBackspace();
-        document.execCommand("insertText", false, line);
-        this.textearea[1].dispatchEvent(new Event("change", { bubbles: true }));
-        this.limparTextarea();
+      if (!active) {
+        this.sendRaw(input);
+        return;
       }
+
+      await this.injectLabel(input, label);
+
+    } catch (err) {
+      debugLog('Erro inesperado:', err);
+      this.sendRaw(input);
+    } finally {
+      setTimeout(() => this.busy = false, 100);
     }
-  };
+  },
 
-  return MessageSend;
-})();
+  async injectLabel(input, label) {
+    const currentText = domActions.getText(input).trim();
+    const signature = `*${label}:*`;
 
-let seunome = "";
+    // Evita duplicação ou mensagens vazias
+    if (!currentText || currentText.startsWith(signature)) {
+      this.sendRaw(input);
+      return;
+    }
 
-function carregarSeuNome() {
-  chrome.storage.local.get("seunome", (data) => {
-    seunome = data.seunome || "";
+    await domActions.moveCaretToBeginning(input);
+    await sleep();
+
+    document.execCommand('insertText', false, signature);
+    await sleep();
+
+    domActions.pressShiftEnter(input);
+    await sleep();
+
+    this.sendRaw(input);
+  },
+
+  sendRaw(input) {
+    input.removeEventListener('keydown', interceptEnter, true);
+    domActions.pressEnter(input);
+    input.addEventListener('keydown', interceptEnter, true);
+  }
+};
+
+/**
+ * Intercepta Enter simples
+ */
+function interceptEnter(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    sendController.handleSend();
+  }
+}
+
+/**
+ * Intercepta clique no botão de envio
+ */
+function interceptClick(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  sendController.handleSend();
+}
+
+/**
+ * Aplica listeners dinamicamente
+ */
+function applyListeners(root) {
+  if (root.nodeType !== Node.ELEMENT_NODE) return;
+
+  root.querySelectorAll(MESSAGE_INPUT_SELECTOR).forEach(el => {
+    if (!el.dataset.autoSignature) {
+      el.addEventListener('keydown', interceptEnter, true);
+      el.dataset.autoSignature = '1';
+    }
+  });
+
+  root.querySelectorAll(SEND_BUTTON_SELECTOR).forEach(btn => {
+    if (!btn.dataset.autoSignature) {
+      btn.addEventListener('click', interceptClick, true);
+      btn.dataset.autoSignature = '1';
+    }
+  });
+
+  root.querySelectorAll(MEDIA_CONFIRM_SELECTOR).forEach(btn => {
+    if (!btn.dataset.autoSignature) {
+      btn.addEventListener('click', interceptClick, true);
+      btn.dataset.autoSignature = '1';
+    }
   });
 }
 
-carregarSeuNome();
+/**
+ * Observer principal
+ */
+function initObserver() {
+  applyListeners(document.body);
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.seunome) {
-    seunome = changes.seunome.newValue || "";
-  }
-});
+  const observer = new MutationObserver(mutations => {
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => applyListeners(node));
+    });
+  });
 
-const messageSend = new ZapZap.MessageSend();
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
 
-let timeout = null;
-const observer = new MutationObserver(() => {
-  if (!seunome) return;
-
-    messageSend.iniciar(seunome);
-});
-
-observer.observe(document.body, {
-  childList: true,
-  subtree: true,
-});
+// Inicialização
+initObserver();

@@ -1,28 +1,20 @@
-// 🔹 Executa SOMENTE quando a extensão é instalada
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install") {
-    chrome.storage.local.set({ primeiraInstalacao: true });
+// Executado apenas uma vez, quando a extensão é instalada ou atualizada
+chrome.runtime.onInstalled.addListener(() => {
 
-    // Recarrega apenas o WhatsApp Web
-    chrome.tabs.query(
-      { url: "https://web.whatsapp.com/*" },
-      (tabs) => {
-        tabs.forEach((tab) => {
-          if (tab.id) {
-            chrome.tabs.reload(tab.id);
-          }
-        });
+  // Busco configurações salvas (se existirem)
+  chrome.storage.sync.get(
+    ['userLabel', 'extensionActive'],
+    (config) => {
+
+      // Define um nome padrão caso o usuário ainda não tenha configurado
+      if (config.userLabel === undefined) {
+        chrome.storage.sync.set({ userLabel: 'Nome' });
       }
-    );
-  }
-});
 
-// 🔹 Clique no ícone → reinjeta o content.js manualmente
-chrome.action.onClicked.addListener((tab) => {
-  if (!tab?.id) return;
-
-  chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ["content.js"]
-  });
+      // Extensão vem ativada por padrão
+      if (config.extensionActive === undefined) {
+        chrome.storage.sync.set({ extensionActive: true });
+      }
+    }
+  );
 });

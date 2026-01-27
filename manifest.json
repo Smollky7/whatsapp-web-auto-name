@@ -1,19 +1,25 @@
 {
   "manifest_version": 3,
-  "name": "WhatsApp Web Prefix",
-  "version": "1.0",
-  "description": "Adicionar Prefixo no WhatsApp Web.",
-  "permissions": ["storage", "tabs", "scripting"],
+  "name": "Assinatura Automática - WhatsApp Web",
+  "version": "1.0.0",
+  "description": "Insere automaticamente um identificador no início das mensagens enviadas pelo WhatsApp Web.",
+  "icons": {
+    "128": "icon.png"
+  },
+  "action": {
+    "default_icon": "icon.png",
+    "default_popup": "popup.html"
+  },
   "background": {
     "service_worker": "background.js"
   },
-  "action": {
-    "default_popup": "popup.html"
-  },
   "content_scripts": [
     {
-      "matches": ["https://web.whatsapp.com/*"],
-      "js": ["jquery-3.7.1.min.js", "content.js"]
+      "matches": ["https://web.whatsapp.com/"],
+      "js": ["content.js"]
     }
+  ],
+  "permissions": [
+    "storage"
   ]
 }
