@@ -16,7 +16,10 @@
 
   function readSettings() {
     globalThis.AutoSignature.readSettings(chrome.storage, chrome.runtime, (stored, error) => {
-      if (error) return;
+      if (error) {
+        console.error('[Auto Name] Não foi possível carregar as preferências.', error.message);
+        return;
+      }
       settings = {
         userLabel: normalizeLabel(stored.userLabel),
         extensionActive: stored.extensionActive !== false
@@ -31,38 +34,59 @@
       if (localComposer) return localComposer;
 
       const dialog = target.closest('[role="dialog"]');
-      if (dialog) return dialog.querySelector(LABELED_COMPOSER);
+      if (dialog) {
+        return dialog.querySelector(LABELED_COMPOSER) || dialog.querySelector('[contenteditable="true"]');
+      }
     }
-    return document.querySelector(LABELED_COMPOSER) || document.querySelector(FOOTER_COMPOSER);
+    return document.querySelector(FOOTER_COMPOSER) || document.querySelector(LABELED_COMPOSER);
   }
 
   function addPrefix(input) {
-    if (!settingsReady || !settings.extensionActive) return;
+    if (!settingsReady) {
+      console.warn('[Auto Name] Preferências ainda indisponíveis; a mensagem não foi alterada.');
+      return null;
+    }
+    if (!settings.extensionActive) return null;
 
     const text = input.innerText || input.textContent || '';
     const updatedText = prefixMessage(text, settings.userLabel);
-    if (updatedText === null) return;
+    if (updatedText === null) return null;
 
     const selection = window.getSelection();
     const previousRanges = selection
       ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange())
       : [];
+    if (!selection) return false;
 
     input.focus();
     const start = document.createRange();
-    start.selectNodeContents(input);
-    start.collapse(true);
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(start);
+    const walker = document.createTreeWalker(input, NodeFilter.SHOW_TEXT);
+    const firstText = walker.nextNode();
+    const firstBreak = input.querySelector('br');
+
+    if (firstBreak && (!firstText || firstBreak.compareDocumentPosition(firstText) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+      start.setStartBefore(firstBreak);
+    } else if (firstText) {
+      start.setStart(firstText, 0);
+    } else {
+      const firstChild = input.firstElementChild || input;
+      start.selectNodeContents(firstChild);
+      start.collapse(true);
     }
+    start.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(start);
 
     const prefix = updatedText.slice(0, updatedText.length - text.length);
-    const inserted = document.execCommand('insertText', false, prefix);
-    if (!inserted && selection) {
+    document.execCommand('insertText', false, prefix);
+    const result = input.innerText || input.textContent || '';
+    if (!result.startsWith(prefix)) {
       selection.removeAllRanges();
       previousRanges.forEach((range) => selection.addRange(range));
+      console.warn('[Auto Name] O editor não confirmou a inserção; o rascunho foi mantido.');
+      return false;
     }
+    return true;
   }
 
   function onKeydown(event) {
@@ -72,7 +96,10 @@
     ) return;
 
     const input = findComposer(event.target);
-    if (input && (input === event.target || input.contains(event.target))) addPrefix(input);
+    if (input && (input === event.target || input.contains(event.target)) && addPrefix(input) === false) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }
 
   function onClick(event) {
@@ -85,7 +112,10 @@
     if (!SEND_LABEL.test(label)) return;
 
     const input = findComposer(control);
-    if (input) addPrefix(input);
+    if (input && addPrefix(input) === false) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }
 
   readSettings();
@@ -93,7 +123,6 @@
     if (areaName !== 'local') return;
     if (changes.userLabel) settings.userLabel = normalizeLabel(changes.userLabel.newValue);
     if (changes.extensionActive) settings.extensionActive = changes.extensionActive.newValue !== false;
-    settingsReady = true;
   });
 
   document.addEventListener('keydown', onKeydown, true);

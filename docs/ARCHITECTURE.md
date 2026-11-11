@@ -13,10 +13,10 @@
 1. O content script carrega as preferências. Se encontrar dados legados, importa apenas as chaves ausentes de `storage.sync` para `storage.local` e remove a cópia sincronizada após a gravação local.
 2. Um Enter simples fora de composição ou um clique em um controle de envio reconhecido consulta o editor associado.
 3. Se a extensão estiver pronta e ativa, o núcleo calcula a mensagem prefixada. Mensagens vazias e mensagens que já começam com a assinatura atual não são modificadas.
-4. O texto é inserido no início do editor via `execCommand('insertText')`. O evento original não é cancelado e nenhum evento de envio sintético é emitido.
+4. O caret é colocado dentro do primeiro nó de texto editável (ou antes da primeira quebra em editores vazios), não no limite externo do host `contenteditable`. `execCommand('insertText')` é seguido por uma verificação do texto renderizado; se o editor não confirmar a alteração, o rascunho é preservado, o envio atual é cancelado e uma advertência sem conteúdo da mensagem é registrada. Quando a inserção é confirmada, o evento original segue sem envio sintético.
 
 Shift+Enter, teclas modificadoras e composição IME não disparam a prefixação. Editores sem texto, como envio de áudio, são deixados intactos.
 
 ## Limites de integração
 
-A extensão depende do DOM renderizado pelo WhatsApp Web. O editor no rodapé é identificado semanticamente por `contenteditable`; editores de legenda podem ser encontrados por alguns rótulos conhecidos. O botão de envio é reconhecido por rótulos acessíveis em português, inglês, espanhol, francês, alemão e italiano. Esses sinais podem mudar. Não há API pública do WhatsApp Web para esse fluxo.
+A extensão depende do DOM renderizado pelo WhatsApp Web. O editor no rodapé é identificado semanticamente por `contenteditable`; em um clique de envio dentro de diálogo, a busca de legenda fica limitada ao diálogo e tenta primeiro os rótulos conhecidos e depois qualquer `contenteditable` nele. O botão de envio é reconhecido por rótulos acessíveis em português, inglês, espanhol, francês, alemão e italiano. Esses sinais podem mudar. Não há API pública do WhatsApp Web para esse fluxo.

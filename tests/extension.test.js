@@ -80,26 +80,56 @@ class FakeInput extends FakeElement {
   focus() {
     this.focused = true;
   }
+
+  querySelector() {
+    return null;
+  }
+}
+
+class FakeTextNode {
+  constructor(parentElement) {
+    this.parentElement = parentElement;
+    this.nodeType = 3;
+  }
 }
 
 class FakeDialog {
-  constructor(composer) {
+  constructor(composer, hasKnownLabel = true) {
     this.composer = composer;
+    this.hasKnownLabel = hasKnownLabel;
   }
 
-  querySelector() {
-    return this.composer;
+  querySelector(selector) {
+    if (selector === '[contenteditable="true"]') return this.composer;
+    if (selector.includes('[aria-label=') || selector.includes('[aria-placeholder=')) {
+      return this.hasKnownLabel ? this.composer : null;
+    }
+    return null;
   }
 }
 
-function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true } = {}) {
+function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, rejectInsert = false } = {}) {
   const input = composer ? new FakeInput('') : null;
   let settingsCallback;
   let changedListener;
   let insertCount = 0;
   let preventDefaultCount = 0;
+  let stopPropagationCount = 0;
+  const warnings = [];
   const range = {
-    selectNodeContents(element) { this.currentEditor = element; },
+    startContainer: null,
+    setStart(container) {
+      this.startContainer = container;
+      this.currentEditor = container.parentElement;
+    },
+    setStartBefore(node) {
+      this.startContainer = node.parentElement;
+      this.currentEditor = node.parentElement;
+    },
+    selectNodeContents(element) {
+      this.startContainer = element;
+      this.currentEditor = element;
+    },
     collapse() {},
     cloneRange() { return { cloneRange: this.cloneRange }; }
   };
@@ -114,8 +144,13 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     addEventListener(type, listener) { documentListeners[type] = listener; },
     querySelector() { return input; },
     createRange() { return range; },
+    createTreeWalker(element) {
+      return { nextNode: () => element.innerText ? new FakeTextNode(element) : null };
+    },
     execCommand(command, _showUI, text) {
       assert.equal(command, 'insertText');
+      if (rejectInsert || range.startContainer === range.currentEditor) return false;
+      assert.ok(range.startContainer instanceof FakeTextNode);
       insertCount += 1;
       range.currentEditor.innerText = text + range.currentEditor.innerText;
       range.currentEditor.textContent = range.currentEditor.innerText;
@@ -142,8 +177,11 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
   const context = {
     AutoSignature: signature,
     Element: FakeElement,
+    NodeFilter: { SHOW_TEXT: 4 },
+    Node: { DOCUMENT_POSITION_FOLLOWING: 4 },
     chrome,
     document,
+    console: { warn: (...args) => warnings.push(args) },
     window: { getSelection: () => selection }
   };
 
@@ -160,6 +198,7 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
       isComposing: false,
       keyCode: 13,
       preventDefault() { preventDefaultCount += 1; },
+      stopPropagation() { stopPropagationCount += 1; },
       ...event
     });
   }
@@ -169,6 +208,8 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     dispatch,
     get insertCount() { return insertCount; },
     get preventDefaultCount() { return preventDefaultCount; },
+    get stopPropagationCount() { return stopPropagationCount; },
+    get warnings() { return warnings; },
     get settingsCallback() { return settingsCallback; },
     get changedListener() { return changedListener; },
     setComposer(value) { document.querySelector = () => value; }
@@ -216,7 +257,7 @@ test('clique em Enviar prefixa texto sem cancelar o clique', () => {
 test('clique de legenda usa o editor do diálogo, não o rascunho principal', () => {
   const harness = createContentHarness();
   const caption = new FakeInput('Legenda');
-  const dialog = new FakeDialog(caption);
+  const dialog = new FakeDialog(caption, false);
   const button = new FakeElement({
     button: true,
     attributes: { 'aria-label': 'Enviar' },
@@ -231,6 +272,19 @@ test('clique de legenda usa o editor do diálogo, não o rascunho principal', ()
   assert.equal(harness.input.innerText, 'Rascunho principal');
 });
 
+test('quando o editor rejeita insertText, preserva o rascunho e registra a falha', () => {
+  const harness = createContentHarness({ rejectInsert: true });
+  harness.input.innerText = 'Mensagem original 😀';
+  harness.input.textContent = harness.input.innerText;
+
+  harness.dispatch('keydown');
+
+  assert.equal(harness.input.innerText, 'Mensagem original 😀');
+  assert.equal(harness.warnings.length, 1);
+  assert.equal(harness.preventDefaultCount, 1);
+  assert.equal(harness.stopPropagationCount, 1);
+});
+
 test('não altera áudio sem editor de texto e aguarda configuração assíncrona', () => {
   const audio = createContentHarness({ composer: false });
   const sendButton = new FakeElement({ button: true, attributes: { 'aria-label': 'Enviar' } });
@@ -242,6 +296,7 @@ test('não altera áudio sem editor de texto e aguarda configuração assíncron
   loading.input.textContent = 'Mensagem';
   loading.dispatch('keydown');
   assert.equal(loading.input.innerText, 'Mensagem');
+  assert.equal(loading.warnings.length, 1);
 
   loading.settingsCallback({});
   loading.dispatch('keydown');
