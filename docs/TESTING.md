@@ -14,6 +14,7 @@ Os testes cobrem:
 - associação de legenda a um `contenteditable` sem rótulo, somente dentro do diálogo de envio;
 - ausência de prefixação em Shift+Enter, composição IME e envio sem editor;
 - espera por configuração assíncrona e fluxo de carregar/salvar/prever no popup.
+- modo diagnóstico `observe`: registra apenas metadados e não chama foco, Selection, Range ou `execCommand`.
 
 ## Validação manual recomendada
 
@@ -26,4 +27,4 @@ Em uma instalação de desenvolvimento, valide em uma conta de teste e sem desti
 5. Teste envio de mídia com e sem legenda e envio de áudio; confirme exatamente o que a interface alterou.
 6. Repita em idiomas disponíveis e após atualizações da interface do site.
 
-Esses passos requerem execução real no navegador. Nenhuma compatibilidade com a versão atual do WhatsApp Web é afirmada com base apenas na suíte simulada.
+Para o A/B temporário `observe`/`insert` no Chrome, siga [docs/DIAGNOSTIC_PLAN.md](DIAGNOSTIC_PLAN.md). Esses passos requerem execução real no navegador. Nenhuma compatibilidade com a versão atual do WhatsApp Web é afirmada com base apenas na suíte simulada.

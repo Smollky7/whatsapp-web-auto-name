@@ -112,15 +112,17 @@ class FakeDialog {
   }
 }
 
-function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, rejectInsert = false, throwDuringRange = false } = {}) {
+function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, rejectInsert = false, throwDuringRange = false, diagnosticMode = 'insert' } = {}) {
   const input = composer ? new FakeInput('') : null;
   let settingsCallback;
   let changedListener;
   let insertCount = 0;
   let preventDefaultCount = 0;
   let stopPropagationCount = 0;
+  let selectionReadCount = 0;
   const warnings = [];
   const errors = [];
+  const diagnostics = [];
   const range = {
     startContainer: null,
     setStart(container) {
@@ -167,6 +169,10 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     storage: {
       local: {
         get(_keys, callback) {
+          if (_keys === 'autoNameDiagnosticMode') {
+            callback({ autoNameDiagnosticMode: diagnosticMode });
+            return;
+          }
           settingsCallback = callback;
           if (!delayedSettings) callback({});
         },
@@ -188,9 +194,10 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     document,
     console: {
       warn: (...args) => warnings.push(args),
-      error: (...args) => errors.push(args)
+      error: (...args) => errors.push(args),
+      info: (...args) => diagnostics.push(args)
     },
-    window: { getSelection: () => selection }
+    window: { getSelection: () => { selectionReadCount += 1; return selection; } }
   };
 
   vm.runInNewContext(contentScript, context);
@@ -217,8 +224,10 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     get insertCount() { return insertCount; },
     get preventDefaultCount() { return preventDefaultCount; },
     get stopPropagationCount() { return stopPropagationCount; },
+    get selectionReadCount() { return selectionReadCount; },
     get warnings() { return warnings; },
     get errors() { return errors; },
+    get diagnostics() { return diagnostics; },
     get settingsCallback() { return settingsCallback; },
     get changedListener() { return changedListener; },
     setComposer(value) { document.querySelector = () => value; }
@@ -294,7 +303,7 @@ test('quando o editor rejeita insertText, preserva o rascunho e registra a falha
   assert.equal(harness.stopPropagationCount, 0);
 });
 
-test('exceção ao criar Range registra stack e nunca bloqueia Enter ou clique', () => {
+test('exceção ao criar Range registra estado técnico e nunca bloqueia Enter ou clique', () => {
   const harness = createContentHarness({ throwDuringRange: true });
   harness.input.innerText = 'Mensagem original';
   harness.input.textContent = harness.input.innerText;
@@ -303,14 +312,30 @@ test('exceção ao criar Range registra stack e nunca bloqueia Enter ou clique',
   assert.equal(harness.input.innerText, 'Mensagem original');
   assert.equal(harness.preventDefaultCount, 0);
   assert.equal(harness.stopPropagationCount, 0);
-  assert.equal(harness.errors.length, 1);
-  assert.equal(harness.errors[0][1].name, 'InvalidStateError');
+  assert.equal(harness.diagnostics.filter((entry) => entry[1].stage === 'exception').length, 1);
+  assert.equal(harness.diagnostics.find((entry) => entry[1].stage === 'exception')[1].errorName, 'InvalidStateError');
 
   const button = new FakeElement({ button: true, attributes: { 'aria-label': 'Enviar' } });
   harness.dispatch('click', { target: button });
   assert.equal(harness.preventDefaultCount, 0);
   assert.equal(harness.stopPropagationCount, 0);
-  assert.equal(harness.errors.length, 2);
+  assert.equal(harness.diagnostics.filter((entry) => entry[1].stage === 'exception').length, 2);
+});
+
+test('modo observe registra estados técnicos sem focar, selecionar ou alterar o rascunho', () => {
+  const harness = createContentHarness({ diagnosticMode: 'observe' });
+  harness.input.innerText = 'Mensagem confidencial 😀';
+  harness.input.textContent = harness.input.innerText;
+  harness.dispatch('keydown');
+
+  assert.equal(harness.input.innerText, 'Mensagem confidencial 😀');
+  assert.equal(harness.input.focused, false);
+  assert.equal(harness.selectionReadCount, 0);
+  assert.equal(harness.insertCount, 0);
+
+  const diagnosticOutput = JSON.stringify(harness.diagnostics);
+  assert.match(diagnosticOutput, /textContentLength/);
+  assert.doesNotMatch(diagnosticOutput, /Mensagem confidencial|Equipe/);
 });
 
 test('não altera áudio sem editor de texto e aguarda configuração assíncrona', () => {

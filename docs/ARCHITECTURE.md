@@ -8,6 +8,10 @@
 - `popup.html`, `popup.css` e `popup.js`: interface de preferências e prévia. Os valores do usuário são exibidos como texto e salvos juntos.
 - `tests/extension.test.js`: testes unitários e simulações isoladas dos fluxos do content script e popup.
 
+## Diagnóstico temporário
+
+`autoNameDiagnosticMode` em `storage.local` aceita `observe` ou `insert`. O padrão é `insert`. `observe` mede evento e estrutura básica sem tocar no editor; `insert` registra também foco, seleção, comprimentos das representações de texto e resultado da tentativa de inserção. Os logs não contêm o texto da mensagem nem o identificador. Remova a chave ao terminar o A/B; instruções em `docs/DIAGNOSTIC_PLAN.md`.
+
 ## Fluxo de envio
 
 1. O content script carrega as preferências. Se encontrar dados legados, importa apenas as chaves ausentes de `storage.sync` para `storage.local` e remove a cópia sincronizada após a gravação local.

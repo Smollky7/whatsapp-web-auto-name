@@ -32,7 +32,7 @@ Para legendas, o evento deve partir de um botão dentro de `[role="dialog"]`; a 
 
 ## 5. Testes e resultados
 
-- `npm test`: 12 passaram, 0 falharam.
+- `npm test`: 13 passaram, 0 falharam.
 - `node --check`: `content.js`, `popup.js`, `signature-core.js` e `tests/extension.test.js` sem erros de sintaxe.
 - Manifesto analisado como JSON: Manifest V3, `storage` como única permissão, origem preservada e scripts em ordem válida.
 - Referências a scripts, CSS e ícone conferidas; `git diff --check` sem problemas.
@@ -41,16 +41,15 @@ Para legendas, o evento deve partir de um botão dentro de `[role="dialog"]`; a 
 
 Os testes usam um DOM simulado. O stub de `execCommand` pode retornar `false`, e `createRange()` pode lançar uma `DOMException`; os testes confirmam que Enter/clique não são cancelados. O teste ainda não reproduz o motor de edição, o estado interno do React/Lexical, eventos confiáveis, IME ou a árvore DOM efetiva do WhatsApp. A pilha reproduzida no teste é artificial e **não é a exceção reportada pelo usuário**.
 
-Não há Chrome/Chromium ou Playwright disponível neste container; portanto, os fluxos reportados como falhos não puderam ser repetidos no navegador real e a correção não pode ser declarada funcional em produção. A inserção ainda depende de `execCommand('insertText')` atualizar a árvore do editor real. Se a configuração não estiver pronta, a inserção falhar ou ocorrer exceção, o envio original segue sem prefixo e o rascunho não é bloqueado pela extensão. A mensagem/stack exatas do erro original ainda precisam ser fornecidas para confirmar se o ponto causador estava em `TreeWalker`, `compareDocumentPosition`, `Range` ou outra operação.
+Não há Chrome/Chromium ou Playwright disponível neste container; portanto, os fluxos reportados como falhos não puderam ser repetidos no navegador real e a correção não pode ser declarada funcional em produção. A inserção ainda depende de `execCommand('insertText')` atualizar a árvore do editor real. Se a configuração não estiver pronta, a inserção falhar ou ocorrer exceção, o envio original segue sem prefixo e o rascunho não é bloqueado pela extensão. O modo A/B em `docs/DIAGNOSTIC_PLAN.md` foi preparado para distinguir os casos; suas leituras de `innerText`, seleção e logs podem afetar o timing no modo `insert`. A mensagem/stack exatas do erro original ainda não foram fornecidas.
 
 ## 7. Procedimento de validação no Chrome
 
-1. Abra `chrome://extensions`, recarregue a extensão carregada sem compactação e confira se não há erro de carregamento do content script.
-2. Atualize `https://web.whatsapp.com/` após recarregar a extensão. No popup, habilite a identificação e salve um nome de teste.
-3. Em uma conversa própria de teste, envie uma mensagem com emoji e linhas criadas por Shift+Enter usando Enter para enviar. Confira no rascunho, antes de enviar, que `*Nome:*` aparece uma única vez no início e que as linhas originais continuam presentes.
-4. Repita usando o botão Enviar. Faça o teste em uma conversa própria, sem destinatários reais.
-5. Selecione uma imagem, adicione legenda e envie pelo botão do diálogo. Confirme que o prefixo entrou na legenda, não no editor da conversa atrás do diálogo.
-6. Teste o envio de áudio e uma mensagem já prefixada; nenhum deve receber uma segunda assinatura.
-7. Se ocorrer exceção, copie a mensagem completa e o stack trace do console, removendo qualquer texto de conversa ou dado pessoal; se a inserção apenas não acontecer, anote o estado do editor e o idioma sem copiar o conteúdo digitado. Teste também após abrir um chat novo e em outros idiomas do site.
+1. Abra `chrome://extensions`, recarregue a extensão e atualize a aba do WhatsApp Web.
+2. Siga os comandos e a comparação A/B em [docs/DIAGNOSTIC_PLAN.md](DIAGNOSTIC_PLAN.md): primeiro `observe`, depois `insert`, repetindo o mesmo tipo de envio.
+3. Teste Enter, botão Enviar, texto com emoji/quebra e legenda de imagem em uma conversa própria. Em `observe`, a assinatura não é aplicada por design; esse modo serve para verificar o envio sem mutação do editor.
+4. Compare sucesso do envio e campos técnicos `[Auto Name][diagnostic]`; os logs não devem conter conteúdo da mensagem.
+5. Se ocorrer exceção, informe `errorName`, `errorCode` e `operation` registrados. A mensagem/pilha originais podem ser compartilhadas somente depois de remover qualquer conteúdo de conversa ou dado pessoal.
+6. Remova `autoNameDiagnosticMode` do armazenamento quando terminar e atualize a aba.
 
 Só depois desses passos em uma instalação local deve-se declarar compatibilidade com a versão testada do WhatsApp Web. Nenhum commit, push ou publicação foi feito para esta correção.

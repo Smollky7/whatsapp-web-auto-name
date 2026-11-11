@@ -22,7 +22,7 @@
 
 ## Testes e validações
 
-- `npm test`: 12 testes passaram, 0 falharam.
+- `npm test`: 13 testes passaram, 0 falharam.
 - `node --check`: `content.js`, `popup.js`, `signature-core.js` e `tests/extension.test.js` passaram.
 - Manifesto: JSON válido, Manifest V3, somente permissão `storage` e sem `host_permissions` extras.
 - Referências estáticas a ícone, scripts e folha de estilos: todos os arquivos existem.
