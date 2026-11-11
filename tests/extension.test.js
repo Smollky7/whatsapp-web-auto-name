@@ -88,12 +88,76 @@ class FakeInput extends FakeElement {
   get firstChild() {
     return this.innerText ? (this.textNode ||= new FakeTextNode(this)) : null;
   }
+
+  get childNodes() {
+    return this.firstChild ? [this.firstChild] : [];
+  }
+
+  contains(element) {
+    let node = element;
+    while (node) {
+      if (node === this) return true;
+      node = node.parentNode;
+    }
+    return false;
+  }
+}
+
+class FakeParagraph {
+  constructor(parent, text = '') {
+    this.parentElement = parent;
+    this.parentNode = parent;
+    this.nodeType = 1;
+    this.tagName = 'P';
+    this.textNode = new FakeTextNode(this, text);
+    this.childNodes = [this.textNode];
+  }
+
+  get textContent() {
+    return this.childNodes.map((node) => node.data).join('');
+  }
+
+  set textContent(value) {
+    this.textNode.data = value;
+  }
+}
+
+class StructuredFakeInput extends FakeElement {
+  constructor(text) {
+    super({ composer: true });
+    this.nodeType = 1;
+    this.tagName = 'DIV';
+    this.isContentEditable = true;
+    this.focused = false;
+    this.paragraph = new FakeParagraph(this, text);
+  }
+
+  get innerText() { return this.paragraph.textContent; }
+  set innerText(value) { this.paragraph.textContent = value; }
+  get textContent() { return this.paragraph.textContent; }
+  set textContent(value) { this.paragraph.textContent = value; }
+  get firstChild() { return this.paragraph; }
+  get firstElementChild() { return this.paragraph; }
+  get childNodes() { return [this.paragraph]; }
+  focus() { this.focused = true; }
+  querySelector() { return null; }
+
+  contains(element) {
+    let node = element;
+    while (node) {
+      if (node === this) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
 }
 
 class FakeTextNode {
-  constructor(parentElement) {
+  constructor(parentElement, data = '') {
     this.parentElement = parentElement;
+    this.parentNode = parentElement;
     this.nodeType = 3;
+    this.data = data;
   }
 }
 
@@ -112,11 +176,14 @@ class FakeDialog {
   }
 }
 
-function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, rejectInsert = false, throwDuringRange = false, diagnosticMode = 'insert' } = {}) {
-  const input = composer ? new FakeInput('') : null;
+function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, structuredEditor = false, rejectInsert = false, execReturnsTrueWithoutMutation = false, throwDuringRange = false, diagnosticMode = 'insert' } = {}) {
+  const input = composer
+    ? structuredEditor ? new StructuredFakeInput('') : new FakeInput('')
+    : null;
   let settingsCallback;
   let changedListener;
   let insertCount = 0;
+  let execCommandCount = 0;
   let preventDefaultCount = 0;
   let stopPropagationCount = 0;
   let selectionReadCount = 0;
@@ -125,12 +192,18 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
   const diagnostics = [];
   const range = {
     startContainer: null,
-    setStart(container) {
+    setStart(container, offset) {
       this.startContainer = container;
+      this.startOffset = offset;
+      this.endContainer = container;
+      this.endOffset = offset;
       this.currentEditor = container.parentElement;
     },
     setStartBefore(node) {
       this.startContainer = node.parentElement;
+      this.startOffset = 0;
+      this.endContainer = node.parentElement;
+      this.endOffset = 0;
       this.currentEditor = node.parentElement;
     },
     selectNodeContents(element) {
@@ -138,13 +211,36 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
       this.currentEditor = element;
     },
     collapse() {},
-    cloneRange() { return { cloneRange: this.cloneRange }; }
+    cloneRange() {
+      return {
+        startContainer: this.startContainer,
+        startOffset: this.startOffset,
+        endContainer: this.endContainer,
+        endOffset: this.endOffset,
+        collapsed: this.collapsed,
+        cloneRange: this.cloneRange
+      };
+    }
   };
   const selection = {
     rangeCount: 0,
+    anchorNode: null,
+    anchorOffset: 0,
+    focusNode: null,
+    focusOffset: 0,
     getRangeAt() { return range; },
-    removeAllRanges() { this.rangeCount = 0; },
-    addRange() { this.rangeCount += 1; }
+    removeAllRanges() {
+      this.rangeCount = 0;
+      this.anchorNode = null;
+      this.focusNode = null;
+    },
+    addRange(nextRange) {
+      this.rangeCount += 1;
+      this.anchorNode = nextRange.startContainer;
+      this.anchorOffset = nextRange.startOffset;
+      this.focusNode = nextRange.endContainer;
+      this.focusOffset = nextRange.endOffset;
+    }
   };
   const documentListeners = {};
   const document = {
@@ -156,11 +252,23 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     },
     execCommand(command, _showUI, text) {
       assert.equal(command, 'insertText');
+      execCommandCount += 1;
       if (rejectInsert || range.startContainer === range.currentEditor) return false;
-      assert.ok(range.startContainer instanceof FakeTextNode);
+      if (execReturnsTrueWithoutMutation) {
+        selection.anchorNode = range.startContainer;
+        selection.anchorOffset = 1;
+        selection.focusNode = range.startContainer;
+        selection.focusOffset = 1;
+        return true;
+      }
+      assert.ok(range.startContainer instanceof FakeTextNode || range.startContainer instanceof FakeParagraph);
       insertCount += 1;
-      range.currentEditor.innerText = text + range.currentEditor.innerText;
-      range.currentEditor.textContent = range.currentEditor.innerText;
+      if (range.startContainer instanceof FakeParagraph) {
+        range.startContainer.textContent = text + range.startContainer.textContent;
+      } else {
+        range.currentEditor.innerText = text + range.currentEditor.innerText;
+        range.currentEditor.textContent = range.currentEditor.innerText;
+      }
       return true;
     }
   };
@@ -197,6 +305,7 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
       error: (...args) => errors.push(args),
       info: (...args) => diagnostics.push(args)
     },
+    performance: { now: () => 10 },
     window: { getSelection: () => { selectionReadCount += 1; return selection; } }
   };
 
@@ -222,6 +331,7 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     input,
     dispatch,
     get insertCount() { return insertCount; },
+    get execCommandCount() { return execCommandCount; },
     get preventDefaultCount() { return preventDefaultCount; },
     get stopPropagationCount() { return stopPropagationCount; },
     get selectionReadCount() { return selectionReadCount; },
@@ -298,7 +408,7 @@ test('quando o editor rejeita insertText, preserva o rascunho e registra a falha
   harness.dispatch('keydown');
 
   assert.equal(harness.input.innerText, 'Mensagem original 😀');
-  assert.equal(harness.warnings.length, 1);
+  assert.ok(harness.warnings.some((entry) => entry[0].includes('editor não confirmou')));
   assert.equal(harness.preventDefaultCount, 0);
   assert.equal(harness.stopPropagationCount, 0);
 });
@@ -336,6 +446,61 @@ test('modo observe registra estados técnicos sem focar, selecionar ou alterar o
   const diagnosticOutput = JSON.stringify(harness.diagnostics);
   assert.match(diagnosticOutput, /textContentLength/);
   assert.doesNotMatch(diagnosticOutput, /Mensagem confidencial|Equipe/);
+});
+
+test('DIV > P: execCommand true sem mutação é distinguido do prefixo realmente inserido', () => {
+  const harness = createContentHarness({
+    structuredEditor: true,
+    execReturnsTrueWithoutMutation: true
+  });
+  harness.input.innerText = '12345';
+  harness.dispatch('keydown');
+
+  assert.equal(harness.input.tagName, 'DIV');
+  assert.equal(harness.input.firstChild.tagName, 'P');
+  assert.equal(harness.execCommandCount, 1);
+  assert.equal(harness.input.innerText, '12345');
+
+  const before = harness.diagnostics.find((entry) => entry[1].stage === 'before-exec')[1];
+  const after = harness.diagnostics.find((entry) => entry[1].stage === 'after-insert')[1];
+  assert.equal(before.editorTree[1].tag, 'P');
+  assert.equal(before.editorTree[2].textLength, 5);
+  assert.deepEqual(JSON.parse(JSON.stringify(before.anchorPath)), [0]);
+  assert.equal(after.execCommandResult, true);
+  assert.equal(after.anchorNodeType, 1);
+  assert.equal(after.anchorOffset, 1);
+  assert.equal(after.innerTextLength, 5);
+  assert.equal(after.textContentLength, 5);
+  assert.equal(after.innerTextStartsWithPrefix, false);
+  assert.equal(after.textContentStartsWithPrefix, false);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(after.editorTree.map(({ path, nodeType, tag, textLength, childCount }) => ({ path, nodeType, tag, textLength, childCount })))),
+    JSON.parse(JSON.stringify(before.editorTree.map(({ path, nodeType, tag, textLength, childCount }) => ({ path, nodeType, tag, textLength, childCount }))))
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(after.immediateMutations)), []);
+});
+
+test('beforeinput/input registram tipo e comprimento, nunca o valor do evento', () => {
+  const harness = createContentHarness({ diagnosticMode: 'insert' });
+  harness.input.innerText = 'Mensagem teste';
+  harness.dispatch('beforeinput', {
+    type: 'beforeinput',
+    inputType: 'insertText',
+    data: 'CONTEUDO-PRIVADO'
+  });
+  harness.dispatch('input', {
+    type: 'input',
+    inputType: 'insertText',
+    data: 'CONTEUDO-PRIVADO'
+  });
+
+  const events = harness.diagnostics
+    .map((entry) => entry[1])
+    .filter((state) => state.stage === 'beforeinput' || state.stage === 'input');
+  assert.equal(events.length, 2);
+  assert.ok(events.every((state) => state.inputType === 'insertText'));
+  assert.ok(events.every((state) => state.inputDataLength === 'CONTEUDO-PRIVADO'.length));
+  assert.doesNotMatch(JSON.stringify(events), /CONTEUDO-PRIVADO|Mensagem teste/);
 });
 
 test('não altera áudio sem editor de texto e aguarda configuração assíncrona', () => {

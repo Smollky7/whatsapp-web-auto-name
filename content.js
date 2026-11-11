@@ -14,7 +14,7 @@
 
   let settings = { userLabel: DEFAULT_LABEL, extensionActive: true };
   let settingsReady = false;
-  let diagnosticMode = 'insert';
+  let diagnosticMode = 'off';
 
   function readSettings() {
     globalThis.AutoSignature.readSettings(chrome.storage, chrome.runtime, (stored, error) => {
@@ -34,11 +34,14 @@
   }
 
   function logDiagnostic(stage, trigger, event, input, details = {}) {
+    if (diagnosticMode === 'off') return;
+
     try {
       const state = {
         stage,
         trigger,
         mode: diagnosticMode,
+        time: Math.round(performance.now()),
         isTrusted: event?.isTrusted ?? null,
         eventPhase: event?.eventPhase ?? null,
         defaultPrevented: event?.defaultPrevented ?? null,
@@ -60,11 +63,24 @@
         state.rangeCount = selection?.rangeCount ?? null;
         state.anchorNodeType = selection?.anchorNode?.nodeType ?? null;
         state.anchorOffset = selection?.anchorOffset ?? null;
+        state.anchorPath = selection?.anchorNode ? nodePath(input, selection.anchorNode) : null;
         state.anchorInsideComposer = selection?.anchorNode
           ? input.contains(selection.anchorNode)
           : null;
         state.focusNodeType = selection?.focusNode?.nodeType ?? null;
         state.focusOffset = selection?.focusOffset ?? null;
+        state.focusPath = selection?.focusNode ? nodePath(input, selection.focusNode) : null;
+        state.ranges = Array.from({ length: selection?.rangeCount ?? 0 }, (_, index) => {
+          const range = selection.getRangeAt(index);
+          return {
+            startPath: nodePath(input, range.startContainer),
+            startOffset: range.startOffset,
+            endPath: nodePath(input, range.endContainer),
+            endOffset: range.endOffset,
+            collapsed: range.collapsed
+          };
+        });
+        state.editorTree = editorTreeSnapshot(input);
       } else if (input) {
         state.textContentLength = input.textContent?.length ?? null;
       }
@@ -74,6 +90,83 @@
     } catch (error) {
       console.warn('[Auto Name][diagnostic] Snapshot indisponível.', error.name || 'Error');
     }
+  }
+
+  function nodePath(root, node) {
+    const path = [];
+    let current = node;
+    while (current && current !== root) {
+      const parent = current.parentNode;
+      if (!parent) return null;
+      path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
+      current = parent;
+    }
+    return current === root ? path : null;
+  }
+
+  function summarizeNode(node, path) {
+    return {
+      path,
+      nodeType: node.nodeType,
+      tag: node.nodeType === 1 ? node.tagName : null,
+      textLength: node.nodeType === 3 ? node.data.length : null,
+      childCount: node.childNodes?.length ?? 0
+    };
+  }
+
+  function editorTreeSnapshot(input) {
+    const result = [];
+    const pending = [{ node: input, path: 'root', depth: 0 }];
+    while (pending.length && result.length < 24) {
+      const current = pending.shift();
+      result.push(summarizeNode(current.node, current.path));
+      if (current.depth >= 3) continue;
+      Array.from(current.node.childNodes || []).forEach((child, index) => {
+        pending.push({ node: child, path: `${current.path}.${index}`, depth: current.depth + 1 });
+      });
+    }
+    return result;
+  }
+
+  function summarizeMutations(records, input) {
+    return records.slice(0, 20).map((record) => ({
+      type: record.type,
+      targetPath: nodePath(input, record.target),
+      targetNodeType: record.target.nodeType,
+      targetTag: record.target.nodeType === 1 ? record.target.tagName : null,
+      added: Array.from(record.addedNodes || [], (node) => summarizeNode(node, null)),
+      removed: Array.from(record.removedNodes || [], (node) => summarizeNode(node, null)),
+      oldValueLength: typeof record.oldValue === 'string' ? record.oldValue.length : null
+    }));
+  }
+
+  function startMutationTrace(input, trigger, event) {
+    if (diagnosticMode !== 'insert' || typeof MutationObserver !== 'function') return null;
+
+    try {
+      const observer = new MutationObserver((records) => {
+        logDiagnostic('dom-mutations', trigger, event, input, {
+          mutations: summarizeMutations(records, input)
+        });
+      });
+      observer.observe(input, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        characterDataOldValue: true
+      });
+      return observer;
+    } catch (error) {
+      logDiagnostic('mutation-observer-error', trigger, event, input, {
+        errorName: error?.name || 'Error',
+        errorCode: Number.isFinite(error?.code) ? error.code : null
+      });
+      return null;
+    }
+  }
+
+  function diagnosticModeFrom(value) {
+    return value === 'observe' || value === 'insert' ? value : 'off';
   }
 
   function reportError(error, trigger, event, input, operation) {
@@ -99,6 +192,7 @@
 
   function addPrefix(input, trigger, event) {
     let operation = 'read-editor';
+    let mutationObserver = null;
     try {
       if (!settingsReady) {
         console.warn('[Auto Name] Preferências ainda indisponíveis; a mensagem não foi alterada.');
@@ -110,6 +204,7 @@
       const updatedText = prefixMessage(text, settings.userLabel);
       if (updatedText === null) return null;
 
+      logDiagnostic('before-focus', trigger, event, input);
       operation = 'read-selection';
       const selection = window.getSelection();
       const previousRanges = selection
@@ -134,7 +229,13 @@
 
       const prefix = updatedText.slice(0, updatedText.length - text.length);
       operation = 'exec-command';
+      logDiagnostic('before-exec', trigger, event, input, {
+        prefixLength: prefix.length,
+        inputTextLength: text.length
+      });
+      mutationObserver = startMutationTrace(input, trigger, event);
       const execCommandResult = document.execCommand('insertText', false, prefix);
+      const immediateMutations = mutationObserver?.takeRecords() || [];
       operation = 'verify-result';
       const innerText = input.innerText ?? '';
       const textContent = input.textContent ?? '';
@@ -145,8 +246,27 @@
         execCommandResult: typeof execCommandResult === 'boolean' ? execCommandResult : null,
         innerTextStartsWithPrefix,
         textContentStartsWithPrefix,
-        textRepresentationsDiffer: innerText !== textContent
+        textRepresentationsDiffer: innerText !== textContent,
+        immediateMutations: summarizeMutations(immediateMutations, input)
       });
+      if (mutationObserver) {
+        const observer = mutationObserver;
+        mutationObserver = null;
+        setTimeout(() => {
+          try {
+            const delayedMutations = observer.takeRecords();
+            logDiagnostic('after-delay', trigger, event, input, {
+              delayedMutations: summarizeMutations(delayedMutations, input)
+            });
+          } catch (error) {
+            logDiagnostic('after-delay-error', trigger, event, input, {
+              errorName: error?.name || 'Error'
+            });
+          } finally {
+            observer.disconnect();
+          }
+        }, 250);
+      }
 
       if (!result.startsWith(prefix)) {
         operation = 'restore-selection';
@@ -157,8 +277,28 @@
       }
       return true;
     } catch (error) {
+      mutationObserver?.disconnect();
       reportError(error, trigger, event, input, operation);
       return null;
+    }
+  }
+
+  function onEditorInput(event) {
+    if (diagnosticMode === 'off') return;
+    try {
+      const input = event.target instanceof Element
+        ? event.target.closest('[contenteditable="true"]')
+        : null;
+      if (!input) return;
+
+      logDiagnostic(event.type, event.type, event, input, {
+        inputType: event.inputType || null,
+        inputDataLength: typeof event.data === 'string' ? event.data.length : null,
+        cancelable: event.cancelable,
+        defaultPrevented: event.defaultPrevented
+      });
+    } catch (error) {
+      reportError(error, event.type, event, null, 'input-diagnostic');
     }
   }
 
@@ -214,13 +354,15 @@
     if (changes.userLabel) settings.userLabel = normalizeLabel(changes.userLabel.newValue);
     if (changes.extensionActive) settings.extensionActive = changes.extensionActive.newValue !== false;
     if (changes[DIAGNOSTIC_MODE_KEY]) {
-      diagnosticMode = changes[DIAGNOSTIC_MODE_KEY].newValue === 'observe' ? 'observe' : 'insert';
+      diagnosticMode = diagnosticModeFrom(changes[DIAGNOSTIC_MODE_KEY].newValue);
       logDiagnostic('mode-changed', 'storage', null, null);
     }
   });
 
   document.addEventListener('keydown', onKeydown, true);
   document.addEventListener('click', onClick, true);
+  document.addEventListener('beforeinput', onEditorInput, true);
+  document.addEventListener('input', onEditorInput, true);
   chrome.storage.local.get(DIAGNOSTIC_MODE_KEY, (stored) => {
     if (chrome.runtime.lastError) {
       logDiagnostic('mode-read-error', 'storage', null, null, {
@@ -228,7 +370,7 @@
       });
       return;
     }
-    diagnosticMode = stored[DIAGNOSTIC_MODE_KEY] === 'observe' ? 'observe' : 'insert';
+    diagnosticMode = diagnosticModeFrom(stored[DIAGNOSTIC_MODE_KEY]);
     logDiagnostic('mode-loaded', 'storage', null, null);
   });
 })();
