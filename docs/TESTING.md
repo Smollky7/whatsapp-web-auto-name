@@ -9,7 +9,8 @@ Os testes cobrem:
 - normalização do identificador, limite de caracteres e prefixação idempotente para a assinatura atual;
 - preservação do conteúdo Unicode, espaços e quebras de linha na função pura;
 - migração de preferências antigas de `storage.sync` para `storage.local`;
-- prefixação simulada em Enter simples e clique, com caret dentro de nó de texto; o stub de `execCommand` rejeita explicitamente um caret no host raiz, e um teste separado cobre retorno `false` sem mutação;
+- prefixação simulada em Enter simples e clique, usando Range no primeiro filho como em `ad7d1b9`; `execCommand` pode retornar `false` sem mutação;
+- exceção simulada em `createRange()`, confirmando que a mensagem continua enviável e que o erro é registrado;
 - associação de legenda a um `contenteditable` sem rótulo, somente dentro do diálogo de envio;
 - ausência de prefixação em Shift+Enter, composição IME e envio sem editor;
 - espera por configuração assíncrona e fluxo de carregar/salvar/prever no popup.

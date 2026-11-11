@@ -7,6 +7,7 @@
 | Severidade | Achado comprovado | Correção |
 | --- | --- | --- |
 | Alta | O content script cancelava Enter/clique e tentava reenviar com `KeyboardEvent` sintético, que não representa uma ação confiável do usuário. | Prefixação passiva do rascunho, sem cancelar nem sintetizar o envio. |
+| Alta | Em `c1c9267`, retorno `false` da inserção cancelava Enter/clique; exceções nas APIs de DOM também não eram capturadas nos handlers. | Remover cancelamento dos eventos, capturar/registrar exceções e permitir envio normal mesmo sem prefixo. |
 | Alta | A prévia usava `innerHTML` com o identificador configurável. | Renderização via `textContent` e elementos HTML estáticos. |
 | Média | `storage.sync` propagava preferências entre dispositivos sem necessidade para a função. | Preferências novas em `storage.local`, com migração única das chaves legadas. |
 | Média | Listeners dependiam de observador de mutação e seletores fixos em português; cliques tinham caminhos sobrepostos. | Delegação de eventos no documento, identificação de editor semântico e lista pequena de rótulos multilíngues. |
@@ -21,7 +22,7 @@
 
 ## Testes e validações
 
-- `npm test`: 11 testes passaram, 0 falharam.
+- `npm test`: 12 testes passaram, 0 falharam.
 - `node --check`: `content.js`, `popup.js`, `signature-core.js` e `tests/extension.test.js` passaram.
 - Manifesto: JSON válido, Manifest V3, somente permissão `storage` e sem `host_permissions` extras.
 - Referências estáticas a ícone, scripts e folha de estilos: todos os arquivos existem.

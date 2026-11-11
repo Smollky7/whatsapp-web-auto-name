@@ -84,6 +84,10 @@ class FakeInput extends FakeElement {
   querySelector() {
     return null;
   }
+
+  get firstChild() {
+    return this.innerText ? (this.textNode ||= new FakeTextNode(this)) : null;
+  }
 }
 
 class FakeTextNode {
@@ -108,7 +112,7 @@ class FakeDialog {
   }
 }
 
-function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, rejectInsert = false } = {}) {
+function createContentHarness({ label = 'Equipe', active = true, delayedSettings = false, composer = true, rejectInsert = false, throwDuringRange = false } = {}) {
   const input = composer ? new FakeInput('') : null;
   let settingsCallback;
   let changedListener;
@@ -116,6 +120,7 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
   let preventDefaultCount = 0;
   let stopPropagationCount = 0;
   const warnings = [];
+  const errors = [];
   const range = {
     startContainer: null,
     setStart(container) {
@@ -143,9 +148,9 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
   const document = {
     addEventListener(type, listener) { documentListeners[type] = listener; },
     querySelector() { return input; },
-    createRange() { return range; },
-    createTreeWalker(element) {
-      return { nextNode: () => element.innerText ? new FakeTextNode(element) : null };
+    createRange() {
+      if (throwDuringRange) throw new DOMException('Invalid state for editor range', 'InvalidStateError');
+      return range;
     },
     execCommand(command, _showUI, text) {
       assert.equal(command, 'insertText');
@@ -181,7 +186,10 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     Node: { DOCUMENT_POSITION_FOLLOWING: 4 },
     chrome,
     document,
-    console: { warn: (...args) => warnings.push(args) },
+    console: {
+      warn: (...args) => warnings.push(args),
+      error: (...args) => errors.push(args)
+    },
     window: { getSelection: () => selection }
   };
 
@@ -210,6 +218,7 @@ function createContentHarness({ label = 'Equipe', active = true, delayedSettings
     get preventDefaultCount() { return preventDefaultCount; },
     get stopPropagationCount() { return stopPropagationCount; },
     get warnings() { return warnings; },
+    get errors() { return errors; },
     get settingsCallback() { return settingsCallback; },
     get changedListener() { return changedListener; },
     setComposer(value) { document.querySelector = () => value; }
@@ -281,8 +290,27 @@ test('quando o editor rejeita insertText, preserva o rascunho e registra a falha
 
   assert.equal(harness.input.innerText, 'Mensagem original 😀');
   assert.equal(harness.warnings.length, 1);
-  assert.equal(harness.preventDefaultCount, 1);
-  assert.equal(harness.stopPropagationCount, 1);
+  assert.equal(harness.preventDefaultCount, 0);
+  assert.equal(harness.stopPropagationCount, 0);
+});
+
+test('exceção ao criar Range registra stack e nunca bloqueia Enter ou clique', () => {
+  const harness = createContentHarness({ throwDuringRange: true });
+  harness.input.innerText = 'Mensagem original';
+  harness.input.textContent = harness.input.innerText;
+
+  harness.dispatch('keydown');
+  assert.equal(harness.input.innerText, 'Mensagem original');
+  assert.equal(harness.preventDefaultCount, 0);
+  assert.equal(harness.stopPropagationCount, 0);
+  assert.equal(harness.errors.length, 1);
+  assert.equal(harness.errors[0][1].name, 'InvalidStateError');
+
+  const button = new FakeElement({ button: true, attributes: { 'aria-label': 'Enviar' } });
+  harness.dispatch('click', { target: button });
+  assert.equal(harness.preventDefaultCount, 0);
+  assert.equal(harness.stopPropagationCount, 0);
+  assert.equal(harness.errors.length, 2);
 });
 
 test('não altera áudio sem editor de texto e aguarda configuração assíncrona', () => {

@@ -13,7 +13,7 @@
 1. O content script carrega as preferências. Se encontrar dados legados, importa apenas as chaves ausentes de `storage.sync` para `storage.local` e remove a cópia sincronizada após a gravação local.
 2. Um Enter simples fora de composição ou um clique em um controle de envio reconhecido consulta o editor associado.
 3. Se a extensão estiver pronta e ativa, o núcleo calcula a mensagem prefixada. Mensagens vazias e mensagens que já começam com a assinatura atual não são modificadas.
-4. O caret é colocado dentro do primeiro nó de texto editável (ou antes da primeira quebra em editores vazios), não no limite externo do host `contenteditable`. `execCommand('insertText')` é seguido por uma verificação do texto renderizado; se o editor não confirmar a alteração, o rascunho é preservado, o envio atual é cancelado e uma advertência sem conteúdo da mensagem é registrada. Quando a inserção é confirmada, o evento original segue sem envio sintético.
+4. O caret é colocado em `input.firstChild || input`, estratégia usada em `ad7d1b9`. `execCommand('insertText')` é seguido por uma verificação do texto renderizado. Exceções são registradas com stack; falha ou exceção não cancela o evento de envio original, ainda que a assinatura possa não ser inserida.
 
 Shift+Enter, teclas modificadoras e composição IME não disparam a prefixação. Editores sem texto, como envio de áudio, são deixados intactos.
 

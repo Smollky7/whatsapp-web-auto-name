@@ -28,6 +28,10 @@
     });
   }
 
+  function reportError(error) {
+    console.error('[Auto Name] Erro ao preparar a assinatura; o envio nativo continuará.', error);
+  }
+
   function findComposer(target) {
     if (target instanceof Element) {
       const localComposer = target.closest(FOOTER_COMPOSER) || target.closest(LABELED_COMPOSER);
@@ -60,19 +64,8 @@
 
     input.focus();
     const start = document.createRange();
-    const walker = document.createTreeWalker(input, NodeFilter.SHOW_TEXT);
-    const firstText = walker.nextNode();
-    const firstBreak = input.querySelector('br');
-
-    if (firstBreak && (!firstText || firstBreak.compareDocumentPosition(firstText) & Node.DOCUMENT_POSITION_FOLLOWING)) {
-      start.setStartBefore(firstBreak);
-    } else if (firstText) {
-      start.setStart(firstText, 0);
-    } else {
-      const firstChild = input.firstElementChild || input;
-      start.selectNodeContents(firstChild);
-      start.collapse(true);
-    }
+    const firstChild = input.firstChild || input;
+    start.setStart(firstChild, 0);
     start.collapse(true);
     selection.removeAllRanges();
     selection.addRange(start);
@@ -90,31 +83,33 @@
   }
 
   function onKeydown(event) {
-    if (
-      event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey ||
-      event.isComposing || event.keyCode === 229
-    ) return;
+    try {
+      if (
+        event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey ||
+        event.isComposing || event.keyCode === 229
+      ) return;
 
-    const input = findComposer(event.target);
-    if (input && (input === event.target || input.contains(event.target)) && addPrefix(input) === false) {
-      event.preventDefault();
-      event.stopPropagation();
+      const input = findComposer(event.target);
+      if (input && (input === event.target || input.contains(event.target))) addPrefix(input);
+    } catch (error) {
+      reportError(error);
     }
   }
 
   function onClick(event) {
-    const control = event.target instanceof Element
-      ? event.target.closest('button, [role="button"]')
-      : null;
-    if (!control) return;
+    try {
+      const control = event.target instanceof Element
+        ? event.target.closest('button, [role="button"]')
+        : null;
+      if (!control) return;
 
-    const label = `${control.getAttribute('aria-label') || ''} ${control.getAttribute('title') || ''}`;
-    if (!SEND_LABEL.test(label)) return;
+      const label = `${control.getAttribute('aria-label') || ''} ${control.getAttribute('title') || ''}`;
+      if (!SEND_LABEL.test(label)) return;
 
-    const input = findComposer(control);
-    if (input && addPrefix(input) === false) {
-      event.preventDefault();
-      event.stopPropagation();
+      const input = findComposer(control);
+      if (input) addPrefix(input);
+    } catch (error) {
+      reportError(error);
     }
   }
 
