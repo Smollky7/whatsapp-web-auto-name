@@ -1,235 +1,101 @@
-/******************************************************
- * EXTENSÃO: Assinatura Automática WhatsApp Web
- * RESPONSABILIDADE:
- * - Interceptar envio de mensagens
- * - Inserir identificador no início
- ******************************************************/
+(() => {
+  const { DEFAULT_LABEL, prefixMessage, normalizeLabel } = globalThis.AutoSignature;
+  const FOOTER_COMPOSER = 'footer [contenteditable="true"]';
+  const LABELED_COMPOSER = [
+    '[contenteditable="true"][aria-label="Digite uma mensagem"]',
+    '[contenteditable="true"][aria-label="Type a message"]',
+    '[contenteditable="true"][aria-label="Escribe un mensaje"]',
+    '[contenteditable="true"][aria-label="Écrivez un message"]',
+    '[contenteditable="true"][aria-placeholder="Adicione uma legenda"]',
+    '[contenteditable="true"][aria-placeholder="Add a caption"]'
+  ].join(', ');
+  const SEND_LABEL = /\b(enviar|send|envoyer|senden|invia|mandar)\b/i;
 
-const DEBUG_TAG = '[AutoSignature]';
+  let settings = { userLabel: DEFAULT_LABEL, extensionActive: true };
+  let settingsReady = false;
 
-/**
- * Log centralizado pra facilitar debug
- */
-function debugLog(...args) {
-  console.log(DEBUG_TAG, ...args);
-}
+  function readSettings() {
+    globalThis.AutoSignature.readSettings(chrome.storage, chrome.runtime, (stored, error) => {
+      if (error) return;
+      settings = {
+        userLabel: normalizeLabel(stored.userLabel),
+        extensionActive: stored.extensionActive !== false
+      };
+      settingsReady = true;
+    });
+  }
 
-/**
- * Pequeno delay para sincronizar com o DOM
- */
-function sleep(ms = 20) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+  function findComposer(target) {
+    if (target instanceof Element) {
+      const localComposer = target.closest(FOOTER_COMPOSER) || target.closest(LABELED_COMPOSER);
+      if (localComposer) return localComposer;
 
-/**
- * Seletores possíveis para caixa de texto
- * (WhatsApp muda bastante dependendo do contexto)
- */
-const MESSAGE_INPUT_SELECTOR = [
-  'div[contenteditable="true"][aria-label="Digite uma mensagem"]',
-  'div[contenteditable="true"][title="Digite uma mensagem"]',
-  'div[contenteditable="true"][aria-label="Escrever mensagem"]',
-  'div[contenteditable="true"][aria-placeholder="Adicione uma legenda"]'
-].join(', ');
+      const dialog = target.closest('[role="dialog"]');
+      if (dialog) return dialog.querySelector(LABELED_COMPOSER);
+    }
+    return document.querySelector(LABELED_COMPOSER) || document.querySelector(FOOTER_COMPOSER);
+  }
 
-const SEND_BUTTON_SELECTOR = 'button[aria-label="Enviar"]';
-const MEDIA_CONFIRM_SELECTOR = 'div[aria-label="Enviar"]';
+  function addPrefix(input) {
+    if (!settingsReady || !settings.extensionActive) return;
 
-/**
- * Funções utilitárias relacionadas ao DOM
- */
-const domActions = {
-
-  pressEnter(element) {
-    debugLog('Simulando Enter');
-    element.focus();
-
-    element.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        keyCode: 13,
-        which: 13,
-        bubbles: true,
-        cancelable: true
-      })
-    );
-  },
-
-  pressShiftEnter(element) {
-    element.focus();
-
-    element.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        shiftKey: true,
-        bubbles: true
-      })
-    );
-  },
-
-  async moveCaretToBeginning(element) {
-    element.focus();
-    await sleep();
+    const text = input.innerText || input.textContent || '';
+    const updatedText = prefixMessage(text, settings.userLabel);
+    if (updatedText === null) return;
 
     const selection = window.getSelection();
-    if (!selection) return;
+    const previousRanges = selection
+      ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange())
+      : [];
 
-    const range = document.createRange();
-    const textNode = element.firstChild || element;
+    input.focus();
+    const start = document.createRange();
+    start.selectNodeContents(input);
+    start.collapse(true);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(start);
+    }
 
-    range.setStart(textNode, 0);
-    range.collapse(true);
-
-    selection.removeAllRanges();
-    selection.addRange(range);
-  },
-
-  getText(element) {
-    return element.innerText || '';
+    const prefix = updatedText.slice(0, updatedText.length - text.length);
+    const inserted = document.execCommand('insertText', false, prefix);
+    if (!inserted && selection) {
+      selection.removeAllRanges();
+      previousRanges.forEach((range) => selection.addRange(range));
+    }
   }
-};
 
-/**
- * Controla todo o fluxo de envio
- */
-const sendController = {
+  function onKeydown(event) {
+    if (
+      event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey ||
+      event.isComposing || event.keyCode === 229
+    ) return;
 
-  busy: false,
-
-  async handleSend() {
-    if (this.busy) return;
-    this.busy = true;
-
-    const input = document.querySelector(MESSAGE_INPUT_SELECTOR);
-
-    // Caso especial: envio de áudio
-    if (!input) {
-      const audioBtn = document.querySelector(SEND_BUTTON_SELECTOR);
-      if (audioBtn) audioBtn.click();
-      this.busy = false;
-      return;
-    }
-
-    try {
-      const config = await new Promise(resolve =>
-        chrome.storage.sync.get(
-          ['userLabel', 'extensionActive'],
-          resolve
-        )
-      );
-
-      const label = config.userLabel || 'Nome';
-      const active = config.extensionActive !== false;
-
-      if (!active) {
-        this.sendRaw(input);
-        return;
-      }
-
-      await this.injectLabel(input, label);
-
-    } catch (err) {
-      debugLog('Erro inesperado:', err);
-      this.sendRaw(input);
-    } finally {
-      setTimeout(() => this.busy = false, 100);
-    }
-  },
-
-  async injectLabel(input, label) {
-    const currentText = domActions.getText(input).trim();
-    const signature = `*${label}:*`;
-
-    // Evita duplicação ou mensagens vazias
-    if (!currentText || currentText.startsWith(signature)) {
-      this.sendRaw(input);
-      return;
-    }
-
-    await domActions.moveCaretToBeginning(input);
-    await sleep();
-
-    document.execCommand('insertText', false, signature);
-    await sleep();
-
-    domActions.pressShiftEnter(input);
-    await sleep();
-
-    this.sendRaw(input);
-  },
-
-  sendRaw(input) {
-    input.removeEventListener('keydown', interceptEnter, true);
-    domActions.pressEnter(input);
-    input.addEventListener('keydown', interceptEnter, true);
+    const input = findComposer(event.target);
+    if (input && (input === event.target || input.contains(event.target))) addPrefix(input);
   }
-};
 
-/**
- * Intercepta Enter simples
- */
-function interceptEnter(event) {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    event.stopPropagation();
-    sendController.handleSend();
+  function onClick(event) {
+    const control = event.target instanceof Element
+      ? event.target.closest('button, [role="button"]')
+      : null;
+    if (!control) return;
+
+    const label = `${control.getAttribute('aria-label') || ''} ${control.getAttribute('title') || ''}`;
+    if (!SEND_LABEL.test(label)) return;
+
+    const input = findComposer(control);
+    if (input) addPrefix(input);
   }
-}
 
-/**
- * Intercepta clique no botão de envio
- */
-function interceptClick(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  sendController.handleSend();
-}
-
-/**
- * Aplica listeners dinamicamente
- */
-function applyListeners(root) {
-  if (root.nodeType !== Node.ELEMENT_NODE) return;
-
-  root.querySelectorAll(MESSAGE_INPUT_SELECTOR).forEach(el => {
-    if (!el.dataset.autoSignature) {
-      el.addEventListener('keydown', interceptEnter, true);
-      el.dataset.autoSignature = '1';
-    }
+  readSettings();
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.userLabel) settings.userLabel = normalizeLabel(changes.userLabel.newValue);
+    if (changes.extensionActive) settings.extensionActive = changes.extensionActive.newValue !== false;
+    settingsReady = true;
   });
 
-  root.querySelectorAll(SEND_BUTTON_SELECTOR).forEach(btn => {
-    if (!btn.dataset.autoSignature) {
-      btn.addEventListener('click', interceptClick, true);
-      btn.dataset.autoSignature = '1';
-    }
-  });
-
-  root.querySelectorAll(MEDIA_CONFIRM_SELECTOR).forEach(btn => {
-    if (!btn.dataset.autoSignature) {
-      btn.addEventListener('click', interceptClick, true);
-      btn.dataset.autoSignature = '1';
-    }
-  });
-}
-
-/**
- * Observer principal
- */
-function initObserver() {
-  applyListeners(document.body);
-
-  const observer = new MutationObserver(mutations => {
-    mutations.forEach(mutation => {
-      mutation.addedNodes.forEach(node => applyListeners(node));
-    });
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-}
-
-// Inicialização
-initObserver();
+  document.addEventListener('keydown', onKeydown, true);
+  document.addEventListener('click', onClick, true);
+})();

@@ -1,0 +1,12 @@
+{
+  "name": "whatsapp-web-auto-name",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extensão Chrome MV3 para adicionar um identificador a mensagens de texto no WhatsApp Web.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
